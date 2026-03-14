@@ -30,32 +30,39 @@ const BoardReader = {
     const board = this.getBoardElement();
     if (!board) return false;
     
-    // Check for flipped class
+    // 1) Chess.com adds 'flipped' class on <wc-chess-board> when playing black
     if (board.classList.contains('flipped')) return true;
     
-    // Check coordinates - if a1 is in top-right, board is flipped
-    const coords = document.querySelector('.coordinate-light, .coordinates');
-    if (coords) {
-      const firstCoord = coords.textContent.trim()[0];
-      if (firstCoord === '8') return true;
+    // 2) Check the board's own `flipped` property (web-component attribute)
+    if (board.hasAttribute('flipped')) return true;
+    
+    // 3) Check coordinate labels — Chess.com renders rank coords on the side.
+    //    Bottom-left rank should be "1" for white, "8" for black.
+    const coordEls = board.querySelectorAll('.coordinates-rank, .coordinate-light, .coordinate-dark');
+    if (coordEls.length > 0) {
+      // The last rank label rendered is at the bottom
+      const lastCoord = coordEls[coordEls.length - 1]?.textContent?.trim();
+      if (lastCoord === '8') return true;
+      if (lastCoord === '1') return false;
     }
     
-    // Check piece positions - white pieces at top means flipped
-    const pieces = document.querySelectorAll('.piece');
-    let whiteKingSquare = null;
-    pieces.forEach(piece => {
-      const classes = Array.from(piece.classList);
-      if (classes.includes('wk')) {
-        const squareClass = classes.find(c => c.startsWith('square-'));
-        if (squareClass) {
-          whiteKingSquare = parseInt(squareClass.replace('square-', ''));
-        }
-      }
-    });
+    // 4) Fallback: look at white king position in the DOM square classes.
+    //    In starting position white king is on e1 = square-51.
+    //    After rendering, if board is visually flipped but we're looking at
+    //    CSS transforms, the square class stays the same but the visual
+    //    position moves. We can also detect via the CSS transform.
+    const boardStyle = window.getComputedStyle(board);
+    if (boardStyle.transform && boardStyle.transform !== 'none') {
+      // A rotation of 180deg indicates a flipped board
+      if (boardStyle.transform.includes('-1')) return true;
+    }
     
-    // If white king is on rank 7-8 at start, we might be flipped
-    // This is a heuristic, not perfect
     return false;
+  },
+  
+  // Get the color the user is playing ('white' or 'black')
+  getPlayerColor() {
+    return this.isFlipped() ? 'black' : 'white';
   },
   
   // Parse all pieces from DOM and build board array

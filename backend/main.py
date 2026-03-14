@@ -5,6 +5,7 @@ Run: python main.py
 """
 
 import asyncio
+import logging
 import os
 import platform
 import shutil
@@ -14,6 +15,13 @@ from typing import Optional
 
 import chess
 import chess.engine
+
+# Suppress noisy python-chess PV parsing warnings (non-fatal)
+logging.getLogger("chess.engine").setLevel(logging.ERROR)
+
+logger = logging.getLogger("chess_assist")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -86,12 +94,29 @@ def find_stockfish() -> Optional[str]:
 # ── Engine pool (one engine instance, reused across requests) ──
 engine: Optional[chess.engine.SimpleEngine] = None
 stockfish_path: Optional[str] = None
+engine_lock: asyncio.Lock = None  # initialized in lifespan
+
+
+def start_engine() -> Optional[chess.engine.SimpleEngine]:
+    """Start (or restart) the Stockfish engine. Returns the engine or None."""
+    global stockfish_path
+    if not stockfish_path:
+        return None
+    try:
+        eng = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+        eng.configure({"Threads": ENGINE_THREADS, "Hash": ENGINE_HASH_MB})
+        logger.info("Stockfish engine started ✓")
+        return eng
+    except Exception as e:
+        logger.error("Failed to start Stockfish: %s", e)
+        return None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global engine, stockfish_path
+    global engine, stockfish_path, engine_lock
 
+    engine_lock = asyncio.Lock()
     stockfish_path = find_stockfish()
 
     if not stockfish_path:
@@ -115,22 +140,19 @@ async def lifespan(app: FastAPI):
         print("    STOCKFISH_PATH=/path/to/stockfish python main.py")
         print("=" * 60)
         print()
-        print("[Chess Assist API] Running WITHOUT engine (health endpoint available)")
+        logger.warning("Running WITHOUT engine (health endpoint available)")
     else:
-        print(f"[Chess Assist API] Found Stockfish at: {stockfish_path}")
-        try:
-            engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-            engine.configure({"Threads": ENGINE_THREADS, "Hash": ENGINE_HASH_MB})
-            print("[Chess Assist API] Stockfish ready ✓")
-        except Exception as e:
-            print(f"[Chess Assist API] Failed to start Stockfish: {e}")
-            engine = None
+        logger.info("Found Stockfish at: %s", stockfish_path)
+        engine = start_engine()
 
     yield
 
     if engine:
-        engine.quit()
-        print("[Chess Assist API] Stockfish stopped")
+        try:
+            engine.quit()
+        except Exception:
+            pass
+        logger.info("Stockfish stopped")
 
 
 app = FastAPI(title="Chess Assist API", lifespan=lifespan)
@@ -210,6 +232,8 @@ async def health():
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest):
+    global engine
+
     if engine is None:
         detail = "Stockfish engine not available."
         if not stockfish_path:
@@ -222,21 +246,39 @@ async def analyze(req: AnalyzeRequest):
     except ValueError as e:
         raise HTTPException(400, f"Invalid FEN: {e}")
 
-    # Run analysis in a thread (engine is synchronous)
-    loop = asyncio.get_event_loop()
-    try:
-        results = await loop.run_in_executor(
-            None,
-            lambda: engine.analyse(
-                board,
-                chess.engine.Limit(depth=req.depth),
-                multipv=req.multipv,
-            ),
-        )
-    except chess.engine.EngineTerminatedError:
-        raise HTTPException(503, "Engine crashed, please restart the server")
-    except Exception as e:
-        raise HTTPException(500, f"Analysis error: {e}")
+    # Serialize access — SimpleEngine is NOT thread-safe
+    async with engine_lock:
+        loop = asyncio.get_event_loop()
+        try:
+            results = await loop.run_in_executor(
+                None,
+                lambda: engine.analyse(
+                    board,
+                    chess.engine.Limit(depth=req.depth),
+                    multipv=req.multipv,
+                ),
+            )
+        except chess.engine.EngineTerminatedError:
+            logger.error("Engine crashed (EngineTerminatedError) — attempting restart")
+            engine = start_engine()
+            if engine is None:
+                raise HTTPException(503, "Engine crashed and restart failed")
+            # Retry once with the fresh engine
+            try:
+                results = await loop.run_in_executor(
+                    None,
+                    lambda: engine.analyse(
+                        board,
+                        chess.engine.Limit(depth=req.depth),
+                        multipv=req.multipv,
+                    ),
+                )
+            except Exception as retry_err:
+                logger.error("Retry after restart also failed: %s", retry_err)
+                raise HTTPException(503, f"Engine crashed, restart retry failed: {retry_err}")
+        except Exception as e:
+            logger.error("Analysis error: %s", e)
+            raise HTTPException(500, f"Analysis error: {e}")
 
     # Parse results
     moves: list[MoveInfo] = []
