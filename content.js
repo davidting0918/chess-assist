@@ -17,7 +17,6 @@
     theme: 'dark'
   };
   
-  let stockfishWorker = null;
   let isEngineReady = false;
   let currentFEN = null;
   let currentAnalysis = [];
@@ -82,84 +81,43 @@
     });
   }
   
-  // Initialize Stockfish web worker
+  // Initialize Stockfish via background service worker (no direct Worker needed)
   function initStockfish() {
     try {
-      // MV3: Content scripts cannot directly create Workers from extension URLs.
-      // Instead, we create a blob worker that imports the extension script.
-      const workerUrl = chrome.runtime.getURL('stockfish/stockfish-worker.js');
-      
-      // Method 1: Try direct Worker (works in some Chrome versions)
-      try {
-        stockfishWorker = new Worker(workerUrl);
-      } catch (e1) {
-        console.log('[Chess Assist] Direct worker failed, trying blob approach...', e1);
-        // Method 2: Blob worker that fetches and evals the script
-        const blob = new Blob([
-          `importScripts("${workerUrl}");`
-        ], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
-        stockfishWorker = new Worker(blobUrl);
-        URL.revokeObjectURL(blobUrl);
-      }
-      
-      stockfishWorker.onmessage = handleStockfishMessage;
-      stockfishWorker.onerror = (e) => {
-        console.error('[Chess Assist] Worker error:', e);
-        ChessAssistOverlay.setStatus('Engine error — try refreshing', 'error');
-        
-        // Fallback: try loading Stockfish from CDN via blob
-        console.log('[Chess Assist] Trying CDN fallback...');
-        try {
-          const cdnBlob = new Blob([
-            `importScripts("https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js");`,
-            document.querySelector('script[src*="stockfish-worker"]')?.textContent || ''
-          ], { type: 'application/javascript' });
-          const cdnUrl = URL.createObjectURL(cdnBlob);
-          stockfishWorker = new Worker(cdnUrl);
-          stockfishWorker.onmessage = handleStockfishMessage;
-          stockfishWorker.postMessage({ type: 'init' });
-          URL.revokeObjectURL(cdnUrl);
-        } catch(e2) {
-          console.error('[Chess Assist] CDN fallback also failed:', e2);
-        }
-      };
-      
-      // Initialize engine
-      stockfishWorker.postMessage({ type: 'init' });
+      // Ask background to load the engine
+      chrome.runtime.sendMessage({ type: 'sf-init' }).catch(e => {
+        console.error('[Chess Assist] Failed to init engine in background:', e);
+        ChessAssistOverlay.setStatus('Failed to load engine', 'error');
+      });
       ChessAssistOverlay.setStatus('Loading engine...', 'analyzing');
-      
     } catch (e) {
-      console.error('[Chess Assist] Failed to create worker:', e);
+      console.error('[Chess Assist] Failed to send init:', e);
       ChessAssistOverlay.setStatus('Failed to load engine', 'error');
     }
   }
   
-  // Handle messages from Stockfish worker
-  function handleStockfishMessage(e) {
-    const msg = e.data;
-    
+  // Handle Stockfish messages from background service worker
+  function handleStockfishMessage(msg) {
     switch (msg.type) {
-      case 'ready':
+      case 'sf-ready':
         isEngineReady = true;
         ChessAssistOverlay.setStatus('Ready', 'normal');
         console.log('[Chess Assist] Stockfish ready');
-        // Analyze current position
         if (currentFEN) {
           analyzePosition(currentFEN);
         }
         break;
         
-      case 'info':
+      case 'sf-info':
         handleAnalysisInfo(msg.data);
         break;
         
-      case 'bestmove':
+      case 'sf-bestmove':
         isAnalyzing = false;
         ChessAssistOverlay.setStatus('Ready', 'normal');
         break;
         
-      case 'error':
+      case 'sf-error':
         console.error('[Chess Assist] Engine error:', msg.message);
         ChessAssistOverlay.setStatus(msg.message, 'error');
         break;
@@ -254,9 +212,9 @@
     }
   }
   
-  // Send position to Stockfish for analysis
+  // Send position to Stockfish (via background service worker)
   function analyzePosition(fen) {
-    if (!stockfishWorker || !isEngineReady || isPaused) return;
+    if (!isEngineReady || isPaused) return;
     
     isAnalyzing = true;
     currentAnalysis = [];
@@ -267,12 +225,12 @@
     // Clear previous arrows
     ArrowDrawer.clear();
     
-    stockfishWorker.postMessage({
-      type: 'analyze',
+    chrome.runtime.sendMessage({
+      type: 'sf-analyze',
       fen: fen,
       depth: settings.depth,
       multiPV: settings.multiPV
-    });
+    }).catch(e => console.error('[Chess Assist] analyze send failed:', e));
   }
   
   // Set up MutationObserver to detect board changes
@@ -320,8 +278,13 @@
   
   // Set up event listeners
   function setupEventListeners() {
-    // Settings update from popup
+    // Messages from background (Stockfish + settings)
     chrome.runtime.onMessage.addListener((msg) => {
+      // Stockfish engine messages
+      if (msg.type && msg.type.startsWith('sf-')) {
+        handleStockfishMessage(msg);
+      }
+      
       if (msg.type === 'SETTINGS_UPDATED') {
         settings = { ...settings, ...msg.settings };
         ChessAssistOverlay.setTheme(settings.theme);
@@ -351,7 +314,7 @@
       console.log('[Chess Assist] Paused:', isPaused);
       
       if (isPaused) {
-        stockfishWorker?.postMessage({ type: 'stop' });
+        chrome.runtime.sendMessage({ type: 'sf-stop' }).catch(() => {});
         ChessAssistOverlay.setStatus('Paused', 'normal');
       } else {
         readAndAnalyze();
