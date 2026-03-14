@@ -5,6 +5,7 @@ Run: python main.py
 """
 
 import asyncio
+import logging
 import os
 import platform
 import shutil
@@ -14,6 +15,9 @@ from typing import Optional
 
 import chess
 import chess.engine
+
+# Suppress noisy python-chess PV parsing warnings (non-fatal)
+logging.getLogger("chess.engine").setLevel(logging.ERROR)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
