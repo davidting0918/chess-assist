@@ -11,7 +11,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     humanMode: document.getElementById('humanMode'),
     showArrows: document.getElementById('showArrows'),
     showEvalBar: document.getElementById('showEvalBar'),
-    theme: document.getElementById('theme')
+    theme: document.getElementById('theme'),
+    apiUrl: document.getElementById('apiUrl')
   };
   
   // Load current settings
@@ -27,6 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       elements.showArrows.checked = settings.showArrows !== false;
       elements.showEvalBar.checked = settings.showEvalBar !== false;
       elements.theme.value = settings.theme || 'dark';
+      elements.apiUrl.value = settings.apiUrl || 'http://127.0.0.1:5555';
     }
   } catch (e) {
     console.log('Error loading settings:', e);
@@ -41,7 +43,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       humanMode: elements.humanMode.checked,
       showArrows: elements.showArrows.checked,
       showEvalBar: elements.showEvalBar.checked,
-      theme: elements.theme.value
+      theme: elements.theme.value,
+      apiUrl: elements.apiUrl.value.replace(/\/+$/, '') || 'http://127.0.0.1:5555'
     };
     
     try {
@@ -57,6 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   elements.showArrows.addEventListener('change', saveSettings);
   elements.showEvalBar.addEventListener('change', saveSettings);
   elements.theme.addEventListener('change', saveSettings);
+  elements.apiUrl.addEventListener('change', saveSettings);
   
   elements.depth.addEventListener('input', () => {
     elements.depthValue.textContent = elements.depth.value;

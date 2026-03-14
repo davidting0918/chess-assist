@@ -205,6 +205,28 @@ select:focus {
   border-color: #27ae60;
 }
 
+/* Text Input */
+.text-input {
+  width: 100%;
+  background: #333;
+  color: #e0e0e0;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.text-input:focus {
+  border-color: #27ae60;
+}
+
+.text-input::placeholder {
+  color: #666;
+}
+
 /* Footer */
 .popup-footer {
   padding: 12px;
