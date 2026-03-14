@@ -1,23 +1,24 @@
 // Chess Assist - Content Script
-// Main entry point for Chess.com integration
+// Reads Chess.com board, sends FEN to local Stockfish API, displays results.
 
 (function() {
   'use strict';
-  
+
   console.log('[Chess Assist] Content script loaded');
-  
+
   // State
   let settings = {
     enabled: true,
     depth: 18,
-    multiPV: 3,
+    multiPV: 5,
     showArrows: true,
     showEvalBar: true,
     humanMode: false,
-    theme: 'dark'
+    theme: 'dark',
+    apiUrl: 'http://127.0.0.1:5555'
   };
-  
-  let isEngineReady = false;
+
+  let isApiReady = false;
   let currentFEN = null;
   let currentAnalysis = [];
   let isAnalyzing = false;
@@ -26,46 +27,164 @@
   let boardObserver = null;
   let boardElement = null;
   let isFlipped = false;
-  
-  // Initialize extension
+  let abortController = null;
+
+  // ─── Init ───
   async function init() {
     console.log('[Chess Assist] Initializing...');
-    
-    // Load settings
+
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      if (response) {
-        settings = { ...settings, ...response };
-      }
+      if (response) settings = { ...settings, ...response };
     } catch (e) {
       console.log('[Chess Assist] Using default settings');
     }
-    
-    // Wait for board to be available
+
     await waitForBoard();
-    
-    // Create overlay
+
     ChessAssistOverlay.create();
     ChessAssistOverlay.setTheme(settings.theme);
-    
-    // Initialize Stockfish worker
-    initStockfish();
-    
-    // Set up board observer
+
+    // Check API health
+    checkApiHealth();
+
     setupBoardObserver();
-    
-    // Set up event listeners
     setupEventListeners();
-    
-    // Initial position read
-    setTimeout(() => {
-      readAndAnalyze();
-    }, 500);
-    
+
+    setTimeout(() => readAndAnalyze(), 500);
+
     console.log('[Chess Assist] Initialized successfully');
   }
-  
-  // Wait for chess board to appear
+
+  // ─── API Communication ───
+  async function checkApiHealth() {
+    ChessAssistOverlay.setStatus('Connecting to engine...', 'analyzing');
+    try {
+      const resp = await fetch(`${settings.apiUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      const data = await resp.json();
+      if (data.engine) {
+        isApiReady = true;
+        ChessAssistOverlay.setStatus('Ready', 'normal');
+        console.log('[Chess Assist] API connected ✓');
+        if (currentFEN) analyzePosition(currentFEN);
+      } else {
+        ChessAssistOverlay.setStatus('Engine not loaded', 'error');
+        retryApiHealth();
+      }
+    } catch (e) {
+      console.log('[Chess Assist] API not reachable:', e.message);
+      ChessAssistOverlay.setStatus('Start local API server', 'error');
+      retryApiHealth();
+    }
+  }
+
+  function retryApiHealth() {
+    setTimeout(checkApiHealth, 5000);
+  }
+
+  async function analyzePosition(fen) {
+    if (!isApiReady || isPaused) return;
+
+    // Abort previous request
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+
+    isAnalyzing = true;
+    currentAnalysis = [];
+    ChessAssistOverlay.setStatus('Analyzing...', 'analyzing');
+    ChessAssistOverlay.showLoading('Analyzing...');
+    ArrowDrawer.clear();
+
+    try {
+      const resp = await fetch(`${settings.apiUrl}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fen: fen,
+          depth: settings.depth,
+          multipv: settings.multiPV
+        }),
+        signal: abortController.signal
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      handleAnalysisResult(data);
+    } catch (e) {
+      if (e.name === 'AbortError') return; // Superseded by newer request
+      console.error('[Chess Assist] Analysis error:', e.message);
+      isAnalyzing = false;
+
+      if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+        isApiReady = false;
+        ChessAssistOverlay.setStatus('API disconnected', 'error');
+        retryApiHealth();
+      } else {
+        ChessAssistOverlay.setStatus('Error: ' + e.message, 'error');
+      }
+    }
+  }
+
+  function handleAnalysisResult(data) {
+    isAnalyzing = false;
+    currentAnalysis = [];
+
+    for (const move of data.moves) {
+      // Score from white's perspective → adjust for display
+      let displayScore;
+      if (move.score_mate !== null) {
+        displayScore = move.score_mate;
+      } else if (move.score_cp !== null) {
+        displayScore = move.score_cp / 100;
+      } else {
+        displayScore = 0;
+      }
+
+      // If it's black's turn, negate for "side to move" perspective
+      const sideScore = data.turn === 'black' ? -displayScore : displayScore;
+
+      currentAnalysis.push({
+        uci: move.uci,
+        san: move.san,
+        score: sideScore,
+        scoreType: move.score_mate !== null ? 'mate' : 'cp',
+        depth: move.depth,
+        pv: move.pv_uci,
+        pvSan: move.pv_san,
+        scoreDisplay: move.score_display
+      });
+    }
+
+    ChessAssistOverlay.setStatus('Ready', 'normal');
+
+    if (currentAnalysis.length > 0) {
+      // Depth from best line
+      ChessAssistOverlay.setDepth(currentAnalysis[0].depth);
+
+      // Apply human mode
+      let displayMoves = [...currentAnalysis];
+      if (settings.humanMode && Math.random() < 0.15 && displayMoves.length > 1) {
+        [displayMoves[0], displayMoves[1]] = [displayMoves[1], displayMoves[0]];
+      }
+
+      ChessAssistOverlay.setMoves(displayMoves);
+
+      if (displayMoves[0]) {
+        ChessAssistOverlay.setEval(displayMoves[0].score, displayMoves[0].scoreType);
+      }
+
+      if (settings.showArrows) {
+        ArrowDrawer.init(boardElement, isFlipped);
+        ArrowDrawer.drawMoves(displayMoves, isFlipped);
+      }
+    }
+  }
+
+  // ─── Board Reading ───
   function waitForBoard() {
     return new Promise((resolve) => {
       const check = () => {
@@ -80,157 +199,21 @@
       check();
     });
   }
-  
-  // Initialize Stockfish via background service worker (no direct Worker needed)
-  let initRetries = 0;
-  const MAX_INIT_RETRIES = 5;
-  let initRetryTimer = null;
-  
-  function initStockfish() {
-    try {
-      // Ask background to load the engine
-      chrome.runtime.sendMessage({ type: 'sf-init' }).catch(e => {
-        console.error('[Chess Assist] Failed to init engine in background:', e);
-        retryInit();
-      });
-      ChessAssistOverlay.setStatus('Loading engine...', 'analyzing');
-      
-      // Set a timeout — if engine doesn't respond in 5s, retry
-      if (initRetryTimer) clearTimeout(initRetryTimer);
-      initRetryTimer = setTimeout(() => {
-        if (!isEngineReady) {
-          console.log('[Chess Assist] Engine init timeout, retrying...');
-          retryInit();
-        }
-      }, 5000);
-    } catch (e) {
-      console.error('[Chess Assist] Failed to send init:', e);
-      retryInit();
-    }
-  }
-  
-  function retryInit() {
-    if (isEngineReady) return;
-    initRetries++;
-    if (initRetries <= MAX_INIT_RETRIES) {
-      console.log(`[Chess Assist] Retrying engine init (${initRetries}/${MAX_INIT_RETRIES})...`);
-      ChessAssistOverlay.setStatus(`Loading engine (retry ${initRetries})...`, 'analyzing');
-      setTimeout(() => {
-        initStockfish();
-      }, 1000 * initRetries); // Increasing backoff
-    } else {
-      ChessAssistOverlay.setStatus('Engine failed to load', 'error');
-    }
-  }
-  
-  // Handle Stockfish messages from background service worker
-  function handleStockfishMessage(msg) {
-    switch (msg.type) {
-      case 'sf-ready':
-        isEngineReady = true;
-        ChessAssistOverlay.setStatus('Ready', 'normal');
-        console.log('[Chess Assist] Stockfish ready');
-        if (currentFEN) {
-          analyzePosition(currentFEN);
-        }
-        break;
-        
-      case 'sf-info':
-        handleAnalysisInfo(msg.data);
-        break;
-        
-      case 'sf-bestmove':
-        isAnalyzing = false;
-        ChessAssistOverlay.setStatus('Ready', 'normal');
-        break;
-        
-      case 'sf-error':
-        console.error('[Chess Assist] Engine error:', msg.message);
-        ChessAssistOverlay.setStatus(msg.message, 'error');
-        break;
-    }
-  }
-  
-  // Handle analysis info from Stockfish
-  function handleAnalysisInfo(info) {
-    if (!info.move || !info.pv) return;
-    
-    // Update depth display
-    if (info.depth) {
-      ChessAssistOverlay.setDepth(info.depth);
-    }
-    
-    // Store analysis by multipv line
-    const lineIndex = (info.multipv || 1) - 1;
-    
-    // Convert UCI move to readable SAN
-    const san = FENParser.uciToReadable(info.move, currentFEN);
-    
-    currentAnalysis[lineIndex] = {
-      uci: info.move,
-      san: san,
-      score: info.score,
-      scoreType: info.scoreType,
-      depth: info.depth,
-      pv: info.pv
-    };
-    
-    // Adjust score for black's perspective
-    const turn = currentFEN.split(' ')[1];
-    if (turn === 'b') {
-      currentAnalysis[lineIndex].score = -info.score;
-    }
-    
-    // Update UI
-    updateOverlay();
-  }
-  
-  // Update overlay with current analysis
-  function updateOverlay() {
-    const validMoves = currentAnalysis.filter(m => m && m.uci);
-    
-    if (validMoves.length > 0) {
-      // Apply human mode - occasionally shuffle top moves
-      let displayMoves = [...validMoves];
-      if (settings.humanMode && Math.random() < 0.15 && displayMoves.length > 1) {
-        // 15% chance to swap first two moves
-        [displayMoves[0], displayMoves[1]] = [displayMoves[1], displayMoves[0]];
-      }
-      
-      ChessAssistOverlay.setMoves(displayMoves);
-      
-      // Update eval bar with best move score
-      if (validMoves[0]) {
-        ChessAssistOverlay.setEval(validMoves[0].score, validMoves[0].scoreType);
-      }
-      
-      // Draw arrows if enabled
-      if (settings.showArrows) {
-        ArrowDrawer.init(boardElement, isFlipped);
-        ArrowDrawer.drawMoves(displayMoves, isFlipped);
-      }
-    }
-  }
-  
-  // Read board and trigger analysis
+
   function readAndAnalyze() {
     if (isPaused || !settings.enabled) return;
-    
+
     try {
       const newFEN = BoardReader.getFEN();
-      const positionHash = BoardReader.getPositionHash();
-      
-      // Check board orientation
       isFlipped = BoardReader.isFlipped();
-      
-      // Only analyze if position changed
+
+      const positionHash = BoardReader.getPositionHash();
       if (positionHash !== currentFEN?.split(' ').slice(0, 2).join('_')) {
         currentFEN = newFEN;
         currentAnalysis = [];
-        
         console.log('[Chess Assist] Position changed:', newFEN);
-        
-        if (isEngineReady) {
+
+        if (isApiReady) {
           analyzePosition(newFEN);
         }
       }
@@ -238,45 +221,17 @@
       console.error('[Chess Assist] Error reading board:', e);
     }
   }
-  
-  // Send position to Stockfish (via background service worker)
-  function analyzePosition(fen) {
-    if (!isEngineReady || isPaused) return;
-    
-    isAnalyzing = true;
-    currentAnalysis = [];
-    
-    ChessAssistOverlay.setStatus('Analyzing...', 'analyzing');
-    ChessAssistOverlay.showLoading('Analyzing...');
-    
-    // Clear previous arrows
-    ArrowDrawer.clear();
-    
-    chrome.runtime.sendMessage({
-      type: 'sf-analyze',
-      fen: fen,
-      depth: settings.depth,
-      multiPV: settings.multiPV
-    }).catch(e => console.error('[Chess Assist] analyze send failed:', e));
-  }
-  
-  // Set up MutationObserver to detect board changes
+
+  // ─── Board Observer ───
   function setupBoardObserver() {
-    if (boardObserver) {
-      boardObserver.disconnect();
-    }
-    
+    if (boardObserver) boardObserver.disconnect();
+
     boardElement = BoardReader.getBoardElement();
-    if (!boardElement) {
-      console.log('[Chess Assist] Board not found for observer');
-      return;
-    }
-    
-    // Debounce position checks
+    if (!boardElement) return;
+
     let debounceTimer = null;
-    
+
     boardObserver = new MutationObserver((mutations) => {
-      // Filter for relevant changes (piece movements)
       const isRelevant = mutations.some(m => {
         if (m.type === 'childList') return true;
         if (m.type === 'attributes' && m.attributeName === 'class') {
@@ -284,73 +239,59 @@
         }
         return false;
       });
-      
+
       if (isRelevant && isAutoMode) {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          readAndAnalyze();
-        }, 100);
+        debounceTimer = setTimeout(() => readAndAnalyze(), 100);
       }
     });
-    
+
     boardObserver.observe(boardElement, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ['class', 'style']
     });
-    
+
     console.log('[Chess Assist] Board observer started');
   }
-  
-  // Set up event listeners
+
+  // ─── Event Listeners ───
   function setupEventListeners() {
-    // Messages from background (Stockfish + settings)
     chrome.runtime.onMessage.addListener((msg) => {
-      // Stockfish engine messages
-      if (msg.type && msg.type.startsWith('sf-')) {
-        handleStockfishMessage(msg);
-      }
-      
       if (msg.type === 'SETTINGS_UPDATED') {
         settings = { ...settings, ...msg.settings };
         ChessAssistOverlay.setTheme(settings.theme);
-        
+
         if (!settings.showArrows) {
           ArrowDrawer.clear();
         } else if (currentAnalysis.length > 0) {
           ArrowDrawer.init(boardElement, isFlipped);
           ArrowDrawer.drawMoves(currentAnalysis, isFlipped);
         }
-        
-        // Re-analyze with new settings
-        if (currentFEN && isEngineReady) {
+
+        if (currentFEN && isApiReady) {
           analyzePosition(currentFEN);
         }
       }
     });
-    
-    // Overlay control events
+
     window.addEventListener('chess-assist-toggle-auto', () => {
       isAutoMode = !isAutoMode;
-      console.log('[Chess Assist] Auto mode:', isAutoMode);
     });
-    
+
     window.addEventListener('chess-assist-toggle-pause', () => {
       isPaused = !isPaused;
-      console.log('[Chess Assist] Paused:', isPaused);
-      
       if (isPaused) {
-        chrome.runtime.sendMessage({ type: 'sf-stop' }).catch(() => {});
+        if (abortController) abortController.abort();
         ChessAssistOverlay.setStatus('Paused', 'normal');
       } else {
         readAndAnalyze();
       }
     });
-    
+
     window.addEventListener('chess-assist-toggle-arrows', () => {
       settings.showArrows = !settings.showArrows;
-      
       if (!settings.showArrows) {
         ArrowDrawer.clear();
       } else if (currentAnalysis.length > 0) {
@@ -358,22 +299,21 @@
         ArrowDrawer.drawMoves(currentAnalysis, isFlipped);
       }
     });
-    
+
     window.addEventListener('chess-assist-hidden', () => {
       ArrowDrawer.clear();
     });
-    
+
     window.addEventListener('chess-assist-highlight-move', (e) => {
       const uci = e.detail;
       if (uci && uci.length >= 4) {
-        // Highlight single move
         ArrowDrawer.clear();
         ArrowDrawer.init(boardElement, isFlipped);
         ArrowDrawer.drawArrow(uci.substring(0, 2), uci.substring(2, 4), 'best');
       }
     });
-    
-    // Handle page navigation (SPA)
+
+    // Handle SPA navigation
     let lastUrl = location.href;
     new MutationObserver(() => {
       if (location.href !== lastUrl) {
@@ -385,30 +325,25 @@
         }, 1000);
       }
     }).observe(document.body, { childList: true, subtree: true });
-    
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      // Alt+A: Toggle analysis
       if (e.altKey && e.key === 'a') {
         isPaused = !isPaused;
         ChessAssistOverlay.setStatus(isPaused ? 'Paused' : 'Ready');
         if (!isPaused) readAndAnalyze();
       }
-      
-      // Alt+R: Re-analyze
       if (e.altKey && e.key === 'r') {
-        if (currentFEN && isEngineReady) {
-          analyzePosition(currentFEN);
-        }
+        if (currentFEN && isApiReady) analyzePosition(currentFEN);
       }
     });
   }
-  
-  // Start when DOM is ready
+
+  // ─── Start ───
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-  
+
 })();
