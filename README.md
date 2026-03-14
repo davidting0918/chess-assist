@@ -1,74 +1,93 @@
-# Chess Assist - Stockfish Analysis for Chess.com
+# Chess Assist
 
-A Chrome extension that provides real-time Stockfish analysis while playing on Chess.com.
+Real-time Stockfish analysis overlay for Chess.com — a Chrome extension + local API server.
 
-## Features
+```
+chess-assist/
+├── extension/     ← Chrome Extension (reads board, shows analysis)
+└── backend/       ← Python FastAPI server (runs Stockfish)
+```
 
-- **Real-time Analysis**: Automatically analyzes the current position as you play
-- **Top 3 Best Moves**: Shows the three best moves with evaluation scores
-- **Eval Bar**: Visual indication of who's winning
-- **Move Arrows**: Optional arrows drawn on the board showing suggested moves
-- **Auto-recalculate**: Updates when position changes (opponent moves or you play a different move)
-- **Human Mode**: Occasionally shuffles top moves to appear more human
-- **Customizable**: Adjustable depth (10-24), number of lines (1-5), and more
+## How It Works
 
-## Installation
+1. **Backend** runs Stockfish locally and exposes a simple REST API
+2. **Extension** reads the Chess.com board DOM, sends the FEN to the API, and displays best moves with arrows and eval bar
 
-1. Download or clone this repository
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable **Developer mode** (toggle in top-right)
-4. Click **Load unpacked**
-5. Select the `chess-assist` folder
-6. The extension icon should appear in your toolbar
+## Setup
 
-## Usage
+### 1. Backend (Stockfish API)
 
-1. Go to [Chess.com](https://www.chess.com) and start a game (live or daily)
-2. The analysis overlay will appear automatically in the top-right corner
-3. Use the overlay controls:
-   - **🔄 Auto**: Toggle auto-analysis on position change
-   - **⏸ Pause**: Pause/resume analysis
-   - **➤ Arrows**: Show/hide move arrows on the board
+```bash
+# Install Stockfish
+# Windows: download from https://stockfishchess.org/download/ → extract to C:\stockfish\
+# macOS:   brew install stockfish
+# Linux:   sudo apt install stockfish
 
-### Keyboard Shortcuts
+# Install Python deps & run
+cd backend
+pip install -r requirements.txt
+python main.py
+```
 
-- `Alt + A`: Toggle analysis on/off
-- `Alt + R`: Re-analyze current position
+The server auto-detects Stockfish. If it can't find it, set `STOCKFISH_PATH`:
+```bash
+# Windows
+set STOCKFISH_PATH=C:\stockfish\stockfish.exe
+python main.py
 
-### Settings (click extension icon)
+# macOS/Linux
+STOCKFISH_PATH=/path/to/stockfish python main.py
+```
 
-- **Search Depth**: How deep Stockfish searches (10-24, default 18)
-- **Lines to Show**: Number of best moves to display (1-5, default 3)
-- **Human Mode**: Occasionally shows 2nd-best move first
-- **Show Move Arrows**: Draw arrows on the board
-- **Show Eval Bar**: Display evaluation bar
-- **Theme**: Dark or light overlay theme
+Server runs at `http://127.0.0.1:5555`. See [backend/README.md](backend/README.md) for config options.
 
-## Supported Pages
+### 2. Chrome Extension
 
-- `chess.com/game/live/*` - Live games
-- `chess.com/play/*` - Play page
-- `chess.com/game/daily/*` - Daily games
-- `chess.com/live/*` - Live page
-- `chess.com/daily/*` - Daily page
+1. Open Chrome → `chrome://extensions/`
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked** → select the `extension/` folder
+4. Open a game on [Chess.com](https://www.chess.com)
+5. The analysis overlay appears automatically
 
-## Technical Details
+#### Settings (click extension icon)
 
-- Uses Stockfish.js loaded from CDN (no WASM bundling needed)
-- Runs Stockfish in a Web Worker for non-blocking analysis
-- Parses Chess.com's DOM to read board position
-- Uses MutationObserver to detect position changes
-- Chrome Extension Manifest V3 compliant
+- **API URL** — where to reach the Stockfish server (default: `http://127.0.0.1:5555`)
+- **Search Depth** — how deep Stockfish analyses (10–24)
+- **Lines to Show** — number of best moves (1–5)
+- **Human Mode** — occasionally shows 2nd-best move first
+- **Show Arrows / Eval Bar** — toggle visual overlays
+- **Theme** — dark or light
 
-## Notes
+#### Keyboard Shortcuts
 
-- The extension loads Stockfish.js from a CDN on first use
-- Analysis is done locally in your browser (no data sent to servers)
-- First analysis may take a moment while the engine initializes
+| Key | Action |
+|---|---|
+| `Alt+A` | Toggle analysis on/off |
+| `Alt+R` | Re-analyze current position |
+
+## Deploying the Backend Remotely
+
+You can run the backend on any server (e.g. Render, Railway, a VPS):
+
+```bash
+# On your server
+cd backend
+pip install -r requirements.txt
+HOST=0.0.0.0 PORT=5555 python main.py
+```
+
+Then in the extension popup, change **API URL** to `https://your-server.onrender.com` (or wherever it's hosted).
+
+## Supported Chess.com Pages
+
+- `/game/live/*` — Live games
+- `/play/*` — Play page
+- `/game/daily/*` — Daily games
+- `/live/*`, `/daily/*`
 
 ## Disclaimer
 
-This extension is for educational and training purposes. Using engine assistance during rated games on Chess.com violates their fair play policy. Use responsibly.
+For educational and training purposes. Using engine assistance during rated games violates Chess.com's fair play policy.
 
 ## License
 
