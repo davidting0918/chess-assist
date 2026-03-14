@@ -3,7 +3,9 @@
 // importScripts works fine here because this is a classic Worker (not a Service Worker)
 
 let isReady = false;
+let engineLoaded = false;
 let pendingMessages = [];
+let engineOnMessage = null;
 
 // Intercept postMessage BEFORE loading the engine.
 // The engine uses postMessage(string) for UCI output and onmessage for UCI input.
@@ -20,52 +22,77 @@ self.postMessage = function (data, transfer) {
 };
 
 // Load the bundled stockfish engine
-try {
-  importScripts('stockfish-engine.js');
-} catch (e) {
-  _originalPostMessage({ type: 'error', message: 'Failed to load Stockfish engine: ' + e.message });
+function loadEngine() {
+  if (engineLoaded) return;
+  try {
+    _originalPostMessage({ type: 'status', message: 'Loading engine via importScripts...' });
+    importScripts('stockfish-engine.js');
+    engineLoaded = true;
+
+    // The engine overwrites self.onmessage when loaded via importScripts.
+    // Save a ref to it so we can feed it UCI commands.
+    engineOnMessage = self.onmessage;
+
+    _originalPostMessage({ type: 'status', message: 'Engine script loaded, sending uci...' });
+
+    // Now install our own handler for structured messages from the offscreen doc.
+    installHandler();
+
+    // Kick off UCI init
+    sendUCI('uci');
+  } catch (e) {
+    _originalPostMessage({ type: 'error', message: 'Failed to load Stockfish engine: ' + e.message });
+  }
 }
 
-// The engine overwrites self.onmessage when loaded via importScripts.
-// Save a ref to it so we can feed it UCI commands.
-const engineOnMessage = self.onmessage;
+function installHandler() {
+  self.onmessage = function (e) {
+    const msg = e.data;
 
-// Now install our own handler for structured messages from the offscreen doc.
-self.onmessage = function (e) {
-  const msg = e.data;
+    // If it's a string, it might be a raw UCI command (shouldn't happen, but be safe)
+    if (typeof msg === 'string') {
+      if (engineOnMessage) engineOnMessage({ data: msg });
+      return;
+    }
 
-  // If it's a string, it might be a raw UCI command (shouldn't happen, but be safe)
-  if (typeof msg === 'string') {
-    if (engineOnMessage) engineOnMessage({ data: msg });
-    return;
-  }
+    switch (msg.type) {
+      case 'init':
+        // Load engine if not yet loaded, then send 'uci'
+        if (!engineLoaded) {
+          loadEngine();
+        } else if (!isReady) {
+          // Already loaded but not ready — re-send uci
+          sendUCI('uci');
+        } else {
+          // Already ready, just re-notify
+          _originalPostMessage({ type: 'ready' });
+        }
+        break;
 
-  switch (msg.type) {
-    case 'init':
-      // Engine already loaded via importScripts — just send 'uci' to kick off init
-      sendUCI('uci');
-      break;
+      case 'analyze':
+        if (!isReady) {
+          pendingMessages.push(msg);
+          return;
+        }
+        sendUCI('stop');
+        sendUCI('setoption name MultiPV value ' + (msg.multiPV || 3));
+        sendUCI('position fen ' + msg.fen);
+        sendUCI('go depth ' + (msg.depth || 18));
+        break;
 
-    case 'analyze':
-      if (!isReady) {
-        pendingMessages.push(msg);
-        return;
-      }
-      sendUCI('stop');
-      sendUCI('setoption name MultiPV value ' + (msg.multiPV || 3));
-      sendUCI('position fen ' + msg.fen);
-      sendUCI('go depth ' + (msg.depth || 18));
-      break;
+      case 'stop':
+        sendUCI('stop');
+        break;
 
-    case 'stop':
-      sendUCI('stop');
-      break;
+      case 'quit':
+        sendUCI('quit');
+        break;
+    }
+  };
+}
 
-    case 'quit':
-      sendUCI('quit');
-      break;
-  }
-};
+// Install a basic handler right away (before engine loads) to handle 'init'
+installHandler();
 
 // Send a raw UCI command string to the engine
 function sendUCI(cmd) {
@@ -135,4 +162,6 @@ function parseInfoLine(line) {
   return result;
 }
 
-// Engine auto-initialises on load. The 'init' message triggers 'uci' command.
+// Do NOT auto-load the engine. Wait for the 'init' message.
+// This avoids a race condition where the engine loads and sends 'uci'
+// before the offscreen document's message handler is ready.

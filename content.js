@@ -82,17 +82,44 @@
   }
   
   // Initialize Stockfish via background service worker (no direct Worker needed)
+  let initRetries = 0;
+  const MAX_INIT_RETRIES = 5;
+  let initRetryTimer = null;
+  
   function initStockfish() {
     try {
       // Ask background to load the engine
       chrome.runtime.sendMessage({ type: 'sf-init' }).catch(e => {
         console.error('[Chess Assist] Failed to init engine in background:', e);
-        ChessAssistOverlay.setStatus('Failed to load engine', 'error');
+        retryInit();
       });
       ChessAssistOverlay.setStatus('Loading engine...', 'analyzing');
+      
+      // Set a timeout — if engine doesn't respond in 5s, retry
+      if (initRetryTimer) clearTimeout(initRetryTimer);
+      initRetryTimer = setTimeout(() => {
+        if (!isEngineReady) {
+          console.log('[Chess Assist] Engine init timeout, retrying...');
+          retryInit();
+        }
+      }, 5000);
     } catch (e) {
       console.error('[Chess Assist] Failed to send init:', e);
-      ChessAssistOverlay.setStatus('Failed to load engine', 'error');
+      retryInit();
+    }
+  }
+  
+  function retryInit() {
+    if (isEngineReady) return;
+    initRetries++;
+    if (initRetries <= MAX_INIT_RETRIES) {
+      console.log(`[Chess Assist] Retrying engine init (${initRetries}/${MAX_INIT_RETRIES})...`);
+      ChessAssistOverlay.setStatus(`Loading engine (retry ${initRetries})...`, 'analyzing');
+      setTimeout(() => {
+        initStockfish();
+      }, 1000 * initRetries); // Increasing backoff
+    } else {
+      ChessAssistOverlay.setStatus('Engine failed to load', 'error');
     }
   }
   
