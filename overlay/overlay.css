@@ -1,0 +1,371 @@
+/* Chess Assist - Overlay Styles */
+
+#chess-assist-overlay {
+  position: fixed;
+  top: 100px;
+  right: 20px;
+  width: 260px;
+  background: #1a1a2e;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 14px;
+  color: #e0e0e0;
+  z-index: 10000;
+  user-select: none;
+  border: 1px solid #2d2d44;
+  overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+#chess-assist-overlay.light-theme {
+  background: #f5f5f5;
+  color: #333;
+  border-color: #ddd;
+}
+
+#chess-assist-overlay.hidden {
+  display: none;
+}
+
+#chess-assist-overlay.minimized .overlay-body {
+  display: none;
+}
+
+/* Header */
+.overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: #16213e;
+  border-bottom: 1px solid #2d2d44;
+  cursor: move;
+}
+
+.light-theme .overlay-header {
+  background: #e8e8e8;
+  border-bottom-color: #ddd;
+}
+
+.overlay-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.overlay-title .icon {
+  font-size: 16px;
+}
+
+.overlay-depth {
+  font-size: 11px;
+  color: #888;
+  font-weight: normal;
+}
+
+.overlay-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.overlay-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 4px;
+  font-size: 14px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.overlay-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.light-theme .overlay-btn:hover {
+  color: #333;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* Eval Bar */
+.eval-bar-container {
+  height: 8px;
+  background: #c0392b;
+  position: relative;
+  overflow: hidden;
+}
+
+.eval-bar {
+  height: 100%;
+  background: #27ae60;
+  width: 50%;
+  transition: width 0.3s ease;
+}
+
+.eval-bar.black-winning {
+  background: #c0392b;
+  width: 100%;
+}
+
+.eval-value {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 9px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Body */
+.overlay-body {
+  padding: 12px;
+}
+
+/* Status */
+.overlay-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2d2d44;
+}
+
+.light-theme .overlay-status {
+  border-bottom-color: #ddd;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #27ae60;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.analyzing {
+  background: #f39c12;
+}
+
+.status-dot.error {
+  background: #e74c3c;
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Move List */
+.move-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.move-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  background: #252540;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.light-theme .move-item {
+  background: #e0e0e0;
+}
+
+.move-item:hover {
+  background: #2d2d54;
+  transform: translateX(2px);
+}
+
+.light-theme .move-item:hover {
+  background: #d0d0d0;
+}
+
+.move-item.best {
+  background: linear-gradient(90deg, #1e5631 0%, #252540 100%);
+  border-left: 3px solid #27ae60;
+}
+
+.light-theme .move-item.best {
+  background: linear-gradient(90deg, #a8e6cf 0%, #e0e0e0 100%);
+}
+
+.move-rank {
+  width: 20px;
+  font-size: 12px;
+  color: #666;
+  font-weight: 600;
+}
+
+.move-notation {
+  flex: 1;
+  font-weight: 600;
+  font-size: 15px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.move-score {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.move-score.positive {
+  color: #27ae60;
+}
+
+.move-score.negative {
+  color: #e74c3c;
+}
+
+.move-score.mate {
+  color: #f39c12;
+  font-weight: bold;
+}
+
+.move-best-icon {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+/* Footer */
+.overlay-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #16213e;
+  border-top: 1px solid #2d2d44;
+  font-size: 11px;
+}
+
+.light-theme .overlay-footer {
+  background: #e8e8e8;
+  border-top-color: #ddd;
+}
+
+.footer-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.footer-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.light-theme .footer-btn:hover {
+  color: #333;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.footer-btn.active {
+  color: #27ae60;
+}
+
+.footer-btn.paused {
+  color: #e74c3c;
+}
+
+/* No game state */
+.no-game {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+  font-size: 12px;
+}
+
+.no-game .icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+  opacity: 0.5;
+}
+
+/* Loading state */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  gap: 8px;
+  color: #888;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #444;
+  border-top-color: #27ae60;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Arrow overlay on board */
+.chess-assist-arrows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.chess-assist-arrows svg {
+  width: 100%;
+  height: 100%;
+}
+
+.arrow-best {
+  fill: rgba(39, 174, 96, 0.8);
+  stroke: rgba(39, 174, 96, 1);
+  stroke-width: 1;
+}
+
+.arrow-second {
+  fill: rgba(241, 196, 15, 0.6);
+  stroke: rgba(241, 196, 15, 1);
+  stroke-width: 1;
+}
+
+.arrow-third {
+  fill: rgba(52, 152, 219, 0.5);
+  stroke: rgba(52, 152, 219, 1);
+  stroke-width: 1;
+}
+
+/* Dragging state */
+#chess-assist-overlay.dragging {
+  opacity: 0.8;
+  cursor: grabbing;
+}

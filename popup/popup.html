@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess Assist Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <div class="logo">
+        <span class="icon">♞</span>
+        <span class="title">Chess Assist</span>
+      </div>
+      <div class="version">v1.0.0</div>
+    </header>
+    
+    <main class="popup-body">
+      <!-- Master Toggle -->
+      <div class="setting-group highlight">
+        <div class="setting-row">
+          <label for="enabled">Enable Analysis</label>
+          <label class="toggle">
+            <input type="checkbox" id="enabled" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      
+      <!-- Analysis Settings -->
+      <div class="setting-group">
+        <h3>Analysis</h3>
+        
+        <div class="setting-row">
+          <label for="depth">Search Depth</label>
+          <div class="range-container">
+            <input type="range" id="depth" min="10" max="24" value="18">
+            <span class="range-value" id="depth-value">18</span>
+          </div>
+        </div>
+        
+        <div class="setting-row">
+          <label for="multipv">Lines to Show</label>
+          <div class="range-container">
+            <input type="range" id="multipv" min="1" max="5" value="3">
+            <span class="range-value" id="multipv-value">3</span>
+          </div>
+        </div>
+        
+        <div class="setting-row">
+          <label for="humanMode">Human Mode</label>
+          <label class="toggle">
+            <input type="checkbox" id="humanMode">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <p class="setting-hint">Occasionally shows 2nd-best move first</p>
+      </div>
+      
+      <!-- Display Settings -->
+      <div class="setting-group">
+        <h3>Display</h3>
+        
+        <div class="setting-row">
+          <label for="showArrows">Show Move Arrows</label>
+          <label class="toggle">
+            <input type="checkbox" id="showArrows" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        
+        <div class="setting-row">
+          <label for="showEvalBar">Show Eval Bar</label>
+          <label class="toggle">
+            <input type="checkbox" id="showEvalBar" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        
+        <div class="setting-row">
+          <label for="theme">Theme</label>
+          <select id="theme">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+      </div>
+    </main>
+    
+    <footer class="popup-footer">
+      <div class="shortcuts">
+        <span><kbd>Alt</kbd>+<kbd>A</kbd> Toggle</span>
+        <span><kbd>Alt</kbd>+<kbd>R</kbd> Refresh</span>
+      </div>
+    </footer>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
