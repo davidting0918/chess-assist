@@ -1,5 +1,6 @@
 // Chess Assist - Background Service Worker (MV3)
-// Delegates Stockfish to an Offscreen Document (no importScripts needed)
+// Routes messages between content scripts and the offscreen Stockfish engine.
+// Uses chrome.runtime.connect (ports) for reliable offscreen ↔ background comms.
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -12,73 +13,55 @@ const DEFAULT_SETTINGS = {
 };
 
 let activeTabId = null;
+let offscreenPort = null;   // port to the offscreen document
 let offscreenReady = false;
+let pendingForOffscreen = []; // messages queued before offscreen port connects
 
 // ─── Offscreen Document Lifecycle ───
 async function ensureOffscreen() {
-  // Check if already exists
   try {
     const contexts = await chrome.runtime.getContexts({
       contextTypes: ['OFFSCREEN_DOCUMENT']
     });
+    if (contexts.length > 0) return;
+  } catch (_) { /* getContexts might not exist */ }
 
-    if (contexts.length > 0) {
-      offscreenReady = true;
-      return;
-    }
-  } catch (e) {
-    // getContexts might not exist in older Chrome — fall through to create
-    console.warn('[Chess Assist BG] getContexts failed:', e.message);
-  }
-
-  // Create offscreen document
   try {
     await chrome.offscreen.createDocument({
       url: 'offscreen/offscreen.html',
       reasons: ['WORKERS'],
       justification: 'Run Stockfish chess engine in a Web Worker'
     });
-    offscreenReady = true;
-    console.log('[Chess Assist BG] Offscreen document created');
+    console.log('[BG] Offscreen document created');
   } catch (e) {
-    // If it already exists (race condition), that's fine
-    if (e.message?.includes('Only a single offscreen')) {
-      offscreenReady = true;
-    } else {
-      console.error('[Chess Assist BG] Failed to create offscreen doc:', e);
+    if (!e.message?.includes('Only a single offscreen')) {
+      console.error('[BG] Failed to create offscreen doc:', e);
     }
   }
 }
 
-// Forward a command to the offscreen document
-async function sendToOffscreen(msg) {
-  await ensureOffscreen();
-  // Short delay to ensure offscreen document's listener is registered
-  await new Promise(r => setTimeout(r, 50));
-  try {
-    await chrome.runtime.sendMessage(msg);
-  } catch (e) {
-    console.warn('[Chess Assist BG] sendToOffscreen failed, retrying:', e.message);
-    // Retry once after delay — offscreen doc might not be fully loaded yet
-    await new Promise(r => setTimeout(r, 200));
+// Send a message to the offscreen document via port
+function sendToOffscreen(msg) {
+  if (offscreenPort) {
     try {
-      await chrome.runtime.sendMessage(msg);
-    } catch (e2) {
-      console.error('[Chess Assist BG] sendToOffscreen retry failed:', e2.message);
-      // Notify the tab about the error
-      broadcastToTab({ type: 'sf-error', message: 'Failed to reach engine: ' + e2.message });
+      offscreenPort.postMessage(msg);
+      return;
+    } catch (e) {
+      console.warn('[BG] offscreenPort.postMessage failed:', e.message);
+      offscreenPort = null;
     }
   }
+  // Queue it — will be drained when offscreen connects
+  pendingForOffscreen.push(msg);
+  // Make sure offscreen doc exists
+  ensureOffscreen();
 }
 
 // Forward engine messages from offscreen → active tab (content script)
 function broadcastToTab(msg) {
   if (activeTabId) {
-    chrome.tabs.sendMessage(activeTabId, msg).catch(() => {
-      console.warn('[Chess Assist BG] Failed to send to tab', activeTabId);
-    });
+    chrome.tabs.sendMessage(activeTabId, msg).catch(() => {});
   } else {
-    console.warn('[Chess Assist BG] No active tab to broadcast to');
     // Try to find a chess.com tab
     chrome.tabs.query({ url: ['https://www.chess.com/*', 'https://chess.com/*'] }, (tabs) => {
       if (tabs && tabs.length > 0) {
@@ -89,19 +72,46 @@ function broadcastToTab(msg) {
   }
 }
 
-// ─── Message Router ───
+// ─── Port-based communication with offscreen ───
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'offscreen-stockfish') {
+    console.log('[BG] Offscreen port connected');
+    offscreenPort = port;
+
+    // Drain pending messages
+    while (pendingForOffscreen.length > 0) {
+      const msg = pendingForOffscreen.shift();
+      try { port.postMessage(msg); } catch (_) {}
+    }
+
+    port.onMessage.addListener((msg) => {
+      // Engine responses from offscreen → forward to active tab
+      if (msg.type === 'sf-ready' || msg.type === 'sf-info' ||
+          msg.type === 'sf-bestmove' || msg.type === 'sf-error') {
+        console.log('[BG] Engine →', msg.type);
+        broadcastToTab(msg);
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      console.log('[BG] Offscreen port disconnected');
+      offscreenPort = null;
+    });
+  }
+});
+
+// ─── Message Router (for content scripts & popup) ───
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // ── Settings ──
   if (message.type === 'GET_SETTINGS') {
     chrome.storage.local.get('settings').then(({ settings }) => {
       sendResponse(settings || DEFAULT_SETTINGS);
     });
-    return true; // async
+    return true;
   }
 
   if (message.type === 'SAVE_SETTINGS') {
     chrome.storage.local.set({ settings: message.settings }).then(() => {
-      // Notify all chess.com tabs
       chrome.tabs.query({ url: ['https://www.chess.com/*', 'https://chess.com/*'] }, (tabs) => {
         tabs.forEach(tab => {
           chrome.tabs.sendMessage(tab.id, {
@@ -112,16 +122,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       sendResponse({ success: true });
     });
-    return true; // async
+    return true;
   }
 
-  // ── Engine init request from content script ──
+  // ── Engine init from content script ──
   if (message.type === 'sf-init') {
-    if (sender.tab) {
-      activeTabId = sender.tab.id;
-      console.log('[Chess Assist BG] sf-init from tab', activeTabId);
-    }
-    // Forward to offscreen
+    if (sender.tab) activeTabId = sender.tab.id;
+    console.log('[BG] sf-init from tab', activeTabId);
     sendToOffscreen({ type: 'sf-init' });
     sendResponse({ ok: true });
     return false;
@@ -135,15 +142,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // ── Engine responses from offscreen → content script ──
-  if (message.type === 'sf-ready' || message.type === 'sf-info' ||
-      message.type === 'sf-bestmove' || message.type === 'sf-error') {
-    // These come from the offscreen doc, forward to the active tab
-    console.log('[Chess Assist BG] Engine →', message.type);
-    broadcastToTab(message);
-    return false;
-  }
-
   return false;
 });
 
@@ -153,12 +151,10 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (!stored.settings) {
     await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   }
-  // Pre-create offscreen document (but don't init engine yet — wait for tab)
   await ensureOffscreen();
-  console.log('[Chess Assist] Extension installed');
+  console.log('[BG] Extension installed');
 });
 
-// Also create offscreen on service worker startup (after browser restart)
+// Pre-create offscreen on service worker startup
 ensureOffscreen();
-
-console.log('[Chess Assist] Background service worker started');
+console.log('[BG] Service worker started');
