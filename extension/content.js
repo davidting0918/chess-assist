@@ -206,6 +206,10 @@
     try {
       const newFEN = BoardReader.getFEN();
       isFlipped = BoardReader.isFlipped();
+      
+      // Update player color in overlay
+      const playerColor = BoardReader.getPlayerColor();
+      ChessAssistOverlay.setPlayerColor(playerColor);
 
       const positionHash = BoardReader.getPositionHash();
       if (positionHash !== currentFEN?.split(' ').slice(0, 2).join('_')) {
@@ -298,6 +302,21 @@
         ArrowDrawer.init(boardElement, isFlipped);
         ArrowDrawer.drawMoves(currentAnalysis, isFlipped);
       }
+    });
+
+    window.addEventListener('chess-assist-restart', async () => {
+      console.log('[Chess Assist] Restart triggered');
+      // 1. Re-check API health
+      isApiReady = false;
+      // 2. Clear current analysis
+      currentFEN = null;
+      currentAnalysis = [];
+      ArrowDrawer.clear();
+      ChessAssistOverlay.showLoading('Restarting...');
+      // 3. Health check
+      await checkApiHealth();
+      // 4. Re-read board and trigger new analysis
+      readAndAnalyze();
     });
 
     window.addEventListener('chess-assist-hidden', () => {

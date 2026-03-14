@@ -30,8 +30,10 @@ const ChessAssistOverlay = {
           <span class="icon">♞</span>
           <span>Stockfish</span>
           <span class="overlay-depth">d=--</span>
+          <span class="player-badge" title="Detecting side..."></span>
         </div>
         <div class="overlay-controls">
+          <button class="overlay-btn restart-btn" title="Restart analysis">↻</button>
           <button class="overlay-btn minimize-btn" title="Minimize">−</button>
           <button class="overlay-btn close-btn" title="Hide">×</button>
         </div>
@@ -61,7 +63,7 @@ const ChessAssistOverlay = {
           🔄 Auto
         </button>
         <button class="footer-btn pause-btn" title="Pause analysis">
-          ▶ Pause
+          <span class="pause-indicator"></span> Pause
         </button>
         <button class="footer-btn arrows-btn active" title="Show arrows">
           ➤ Arrows
@@ -120,8 +122,12 @@ const ChessAssistOverlay = {
     // Close button
     this.container.querySelector('.close-btn').addEventListener('click', () => {
       this.hide();
-      // Dispatch event for content script
       window.dispatchEvent(new CustomEvent('chess-assist-hidden'));
+    });
+    
+    // Restart button
+    this.container.querySelector('.restart-btn').addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('chess-assist-restart'));
     });
     
     // Footer buttons dispatch events for content script to handle
@@ -131,8 +137,11 @@ const ChessAssistOverlay = {
     });
     
     this.container.querySelector('.pause-btn').addEventListener('click', (e) => {
-      const isPaused = e.target.classList.toggle('paused');
-      e.target.innerHTML = isPaused ? '▶ Resume' : '⏸ Pause';
+      const btn = e.target.closest('.pause-btn');
+      const isPaused = btn.classList.toggle('paused');
+      btn.innerHTML = isPaused
+        ? '<span class="pause-indicator paused"></span> Resume'
+        : '<span class="pause-indicator"></span> Pause';
       window.dispatchEvent(new CustomEvent('chess-assist-toggle-pause'));
     });
     
@@ -238,6 +247,21 @@ const ChessAssistOverlay = {
   
   hide() {
     this.container.classList.add('hidden');
+  },
+  
+  // Set player color badge
+  setPlayerColor(color) {
+    const badge = this.container.querySelector('.player-badge');
+    if (!badge) return;
+    if (color === 'white') {
+      badge.textContent = '♔ W';
+      badge.title = 'Playing as White';
+      badge.className = 'player-badge white';
+    } else {
+      badge.textContent = '♚ B';
+      badge.title = 'Playing as Black';
+      badge.className = 'player-badge black';
+    }
   },
   
   // Set theme

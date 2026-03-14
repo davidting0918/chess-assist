@@ -364,6 +364,60 @@
   stroke-width: 1;
 }
 
+/* Player color badge */
+.player-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+}
+
+.player-badge.white {
+  background: rgba(255, 255, 255, 0.15);
+  color: #f0f0f0;
+}
+
+.player-badge.black {
+  background: rgba(0, 0, 0, 0.35);
+  color: #ccc;
+}
+
+.light-theme .player-badge.white {
+  background: rgba(0, 0, 0, 0.08);
+  color: #555;
+}
+
+.light-theme .player-badge.black {
+  background: rgba(0, 0, 0, 0.15);
+  color: #333;
+}
+
+/* Restart button */
+.restart-btn {
+  font-size: 15px !important;
+  line-height: 1;
+}
+
+.restart-btn:hover {
+  color: #27ae60 !important;
+}
+
+/* Pause indicator dot */
+.pause-indicator {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #27ae60;
+  margin-right: 2px;
+  vertical-align: middle;
+}
+
+.pause-indicator.paused {
+  background: #f39c12;
+}
+
 /* Dragging state */
 #chess-assist-overlay.dragging {
   opacity: 0.8;
