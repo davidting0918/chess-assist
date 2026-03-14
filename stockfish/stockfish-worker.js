@@ -1,70 +1,76 @@
 // Chess Assist - Stockfish Worker
-// Loads Stockfish.js from CDN and handles analysis
+// Uses bundled Stockfish.js engine
 
 let stockfish = null;
 let isReady = false;
-let currentAnalysis = null;
+let pendingMessages = [];
 
-// Stockfish.js CDN - using a well-maintained version
-const STOCKFISH_CDN = 'https://unpkg.com/stockfish@16.0.0/src/stockfish-nnue-16.js';
-const STOCKFISH_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js';
+// Load the bundled stockfish engine
+importScripts('stockfish-engine.js');
 
-// Load Stockfish
-async function loadStockfish() {
-  try {
-    // Try to load newer version first
-    importScripts(STOCKFISH_CDN);
-    stockfish = STOCKFISH();
-  } catch (e) {
-    console.log('[Stockfish Worker] Primary CDN failed, trying fallback...');
-    try {
-      importScripts(STOCKFISH_FALLBACK);
-      stockfish = STOCKFISH ? STOCKFISH() : self;
-    } catch (e2) {
-      console.error('[Stockfish Worker] Failed to load Stockfish:', e2);
-      postMessage({ type: 'error', message: 'Failed to load Stockfish engine' });
-      return;
-    }
-  }
+// Handle messages from content script
+self.onmessage = function(e) {
+  const msg = e.data;
   
-  // Set up message handler for Stockfish output
-  if (stockfish.addMessageListener) {
-    stockfish.addMessageListener(handleStockfishMessage);
-  } else if (stockfish.onmessage !== undefined) {
-    stockfish.onmessage = (e) => handleStockfishMessage(e.data || e);
-  } else {
-    // Fallback: poll for messages
-    const originalPostMessage = postMessage;
-    self.print = handleStockfishMessage;
+  switch (msg.type) {
+    case 'init':
+      initStockfish();
+      break;
+      
+    case 'analyze':
+      if (!isReady) {
+        pendingMessages.push(msg);
+        return;
+      }
+      
+      const multiPV = msg.multiPV || 3;
+      const depth = msg.depth || 18;
+      
+      sendCmd('stop');
+      sendCmd(`setoption name MultiPV value ${multiPV}`);
+      sendCmd(`position fen ${msg.fen}`);
+      sendCmd(`go depth ${depth}`);
+      break;
+      
+    case 'stop':
+      sendCmd('stop');
+      break;
+      
+    case 'quit':
+      sendCmd('quit');
+      break;
   }
-  
-  // Initialize UCI
-  sendToStockfish('uci');
-}
+};
 
-function sendToStockfish(cmd) {
+function sendCmd(cmd) {
   if (!stockfish) return;
   
-  if (stockfish.postMessage) {
-    stockfish.postMessage(cmd);
-  } else if (typeof stockfish === 'function') {
+  if (typeof stockfish === 'function') {
     stockfish(cmd);
+  } else if (stockfish.postMessage) {
+    stockfish.postMessage(cmd);
   }
 }
 
-function handleStockfishMessage(line) {
+function handleOutput(line) {
   if (typeof line !== 'string') return;
   
   // Engine ready
   if (line === 'uciok') {
-    sendToStockfish('setoption name Threads value 1');
-    sendToStockfish('setoption name Hash value 64');
-    sendToStockfish('isready');
+    sendCmd('setoption name Threads value 1');
+    sendCmd('setoption name Hash value 32');
+    sendCmd('isready');
   }
   
   if (line === 'readyok') {
     isReady = true;
     postMessage({ type: 'ready' });
+    
+    // Process any pending messages
+    while (pendingMessages.length > 0) {
+      const msg = pendingMessages.shift();
+      self.onmessage({ data: msg });
+    }
   }
   
   // Analysis info
@@ -99,7 +105,7 @@ function parseInfoLine(line) {
   const mateMatch = line.match(/score mate (-?\d+)/);
   
   if (cpMatch) {
-    result.score = parseInt(cpMatch[1]) / 100; // Convert to pawns
+    result.score = parseInt(cpMatch[1]) / 100;
     result.scoreType = 'cp';
   } else if (mateMatch) {
     result.score = parseInt(mateMatch[1]);
@@ -110,50 +116,42 @@ function parseInfoLine(line) {
   const pvMatch = line.match(/ pv (.+)$/);
   if (pvMatch) {
     result.pv = pvMatch[1].split(' ');
-    result.move = result.pv[0]; // First move in variation
+    result.move = result.pv[0];
   }
-  
-  // Extract nodes and nps for stats
-  const nodesMatch = line.match(/nodes (\d+)/);
-  if (nodesMatch) result.nodes = parseInt(nodesMatch[1]);
-  
-  const npsMatch = line.match(/nps (\d+)/);
-  if (npsMatch) result.nps = parseInt(npsMatch[1]);
   
   return result;
 }
 
-// Handle messages from content script
-self.onmessage = function(e) {
-  const msg = e.data;
+function initStockfish() {
+  postMessage({ type: 'status', message: 'Initializing Stockfish...' });
   
-  switch (msg.type) {
-    case 'init':
-      loadStockfish();
-      break;
-      
-    case 'analyze':
-      if (!isReady) {
-        postMessage({ type: 'error', message: 'Engine not ready' });
-        return;
-      }
-      
-      currentAnalysis = msg.fen;
-      const multiPV = msg.multiPV || 3;
-      const depth = msg.depth || 18;
-      
-      sendToStockfish('stop');
-      sendToStockfish(`setoption name MultiPV value ${multiPV}`);
-      sendToStockfish(`position fen ${msg.fen}`);
-      sendToStockfish(`go depth ${depth}`);
-      break;
-      
-    case 'stop':
-      sendToStockfish('stop');
-      break;
-      
-    case 'quit':
-      sendToStockfish('quit');
-      break;
+  try {
+    // Check how stockfish was exported
+    if (typeof STOCKFISH === 'function') {
+      stockfish = STOCKFISH();
+    } else if (typeof Stockfish === 'function') {
+      stockfish = Stockfish();
+    } else {
+      throw new Error('Stockfish not found');
+    }
+    
+    // Set up output handler
+    if (stockfish.addMessageListener) {
+      stockfish.addMessageListener(handleOutput);
+    } else if (stockfish.onmessage !== undefined) {
+      stockfish.onmessage = function(e) {
+        handleOutput(e.data || e);
+      };
+    } else {
+      // Use print function for output
+      self.print = handleOutput;
+    }
+    
+    // Initialize UCI
+    sendCmd('uci');
+    
+  } catch (e) {
+    console.error('Failed to initialize Stockfish:', e);
+    postMessage({ type: 'error', message: 'Failed to initialize Stockfish: ' + e.message });
   }
-};
+}

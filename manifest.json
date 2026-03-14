@@ -50,7 +50,10 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["stockfish/stockfish-worker.js"],
+      "resources": [
+        "stockfish/stockfish-worker.js",
+        "stockfish/stockfish-engine.js"
+      ],
       "matches": ["https://www.chess.com/*", "https://chess.com/*"]
     }
   ]
