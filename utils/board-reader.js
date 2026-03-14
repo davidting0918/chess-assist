@@ -78,7 +78,8 @@ const BoardReader = {
         }
       }
       
-      // Find square (square-44 format: file=4, rank=4 → e4)
+      // Find square (square-XY format: X=file 1-8, Y=rank 1-8)
+      // Chess.com uses "square-14" meaning file=1(a), rank=4
       let square = null;
       for (const cls of classes) {
         if (cls.startsWith('square-')) {
@@ -87,9 +88,20 @@ const BoardReader = {
         }
       }
       
-      if (pieceType && square && square.length === 2) {
-        const file = parseInt(square[0]) - 1; // 0-7 (a-h)
-        const rank = parseInt(square[1]) - 1; // 0-7 (1-8)
+      if (pieceType && square) {
+        let file, rank;
+        if (square.length === 2) {
+          file = parseInt(square[0]) - 1; // 0-7 (a-h)
+          rank = parseInt(square[1]) - 1; // 0-7 (1-8)
+        } else if (square.length === 3) {
+          // Some versions use 3-digit format like "104" for (10,4)
+          // But standard is 2-digit. Skip 3-digit gracefully.
+          file = -1;
+          rank = -1;
+        } else {
+          file = -1;
+          rank = -1;
+        }
         
         if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
           board[7 - rank][file] = pieceType; // Convert to array indices

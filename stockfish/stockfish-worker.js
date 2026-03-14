@@ -6,7 +6,17 @@ let isReady = false;
 let pendingMessages = [];
 
 // Load the bundled stockfish engine
-importScripts('stockfish-engine.js');
+// In MV3 workers, importScripts needs the full extension URL
+try {
+  importScripts('stockfish-engine.js');
+} catch(e) {
+  // Fallback: load from CDN if local file fails
+  try {
+    importScripts('https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js');
+  } catch(e2) {
+    postMessage({ type: 'error', message: 'Failed to load Stockfish: ' + e2.message });
+  }
+}
 
 // Handle messages from content script
 self.onmessage = function(e) {

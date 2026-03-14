@@ -85,13 +85,44 @@
   // Initialize Stockfish web worker
   function initStockfish() {
     try {
+      // MV3: Content scripts cannot directly create Workers from extension URLs.
+      // Instead, we create a blob worker that imports the extension script.
       const workerUrl = chrome.runtime.getURL('stockfish/stockfish-worker.js');
-      stockfishWorker = new Worker(workerUrl);
+      
+      // Method 1: Try direct Worker (works in some Chrome versions)
+      try {
+        stockfishWorker = new Worker(workerUrl);
+      } catch (e1) {
+        console.log('[Chess Assist] Direct worker failed, trying blob approach...', e1);
+        // Method 2: Blob worker that fetches and evals the script
+        const blob = new Blob([
+          `importScripts("${workerUrl}");`
+        ], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        stockfishWorker = new Worker(blobUrl);
+        URL.revokeObjectURL(blobUrl);
+      }
       
       stockfishWorker.onmessage = handleStockfishMessage;
       stockfishWorker.onerror = (e) => {
         console.error('[Chess Assist] Worker error:', e);
-        ChessAssistOverlay.setStatus('Engine error', 'error');
+        ChessAssistOverlay.setStatus('Engine error — try refreshing', 'error');
+        
+        // Fallback: try loading Stockfish from CDN via blob
+        console.log('[Chess Assist] Trying CDN fallback...');
+        try {
+          const cdnBlob = new Blob([
+            `importScripts("https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js");`,
+            document.querySelector('script[src*="stockfish-worker"]')?.textContent || ''
+          ], { type: 'application/javascript' });
+          const cdnUrl = URL.createObjectURL(cdnBlob);
+          stockfishWorker = new Worker(cdnUrl);
+          stockfishWorker.onmessage = handleStockfishMessage;
+          stockfishWorker.postMessage({ type: 'init' });
+          URL.revokeObjectURL(cdnUrl);
+        } catch(e2) {
+          console.error('[Chess Assist] CDN fallback also failed:', e2);
+        }
       };
       
       // Initialize engine
